@@ -34,7 +34,7 @@ def generate_answer(question, max_length=150):
             no_repeat_ngram_size=2,  # Prevent repetition
             top_p=0.95,  # Top-p sampling
             top_k=60,  # Top-k sampling
-            temperature=0.9  # Temperature for creativity
+            temperature=0.1  # Temperature for 0.1 for most deterministic and 0.99 for most creativity
         )
 
     # Decode the generated text and return it
