@@ -187,11 +187,17 @@ def create_instruction_dataset(repo_code_list):
 
         instructions = []
         
+        instructions.append(f"What are the contents of the file {file_path}?")
         instructions.append(f"What are the contents of file {file_path}?")
+        instructions.append(f"Contents of file {file_path}?")
+        instructions.append(f"What is in the file {file_path}?")
         instructions.append(f"What is in file {file_path}?")
+        instructions.append(f"Show me the file {file_path}?")
         instructions.append(f"Show me file {file_path}?")
+        instructions.append(f"Discuss the file {file_path}?")
         instructions.append(f"Discuss file {file_path}?")
         instructions.append(f"Discuss the following file {file_path}?")
+        instructions.append(f"{file_path}")
 
         # Context: Mention it's programming source code in the Everything App frontend
         context = f"The file {file_path} contains programming source code for The Everything App frontend which is built using React, Next.js, Prisma, Sass, websockets, etc."
@@ -268,6 +274,10 @@ def preprocess_with_context(example):
 
 processed_dataset = dataset.map(function=preprocess_with_context, batched=False)
 processed_dataset = processed_dataset.filter(lambda x: x is not None)
+print(f"\n{processed_dataset}\n")
+train_dataset, eval_dataset = processed_dataset.train_test_split(test_size=0.2, seed=42).values()
+print(f"\n{train_dataset}\n{eval_dataset}\n")
+
 
 # Check the lengths after tokenization
 # example = processed_dataset[0]  # First example in the processed dataset
@@ -298,19 +308,19 @@ training_args = TrainingArguments(
     bf16=False,  # Disable 16-bit precision for CPU
 )
 
-# data_collator = DataCollatorForLanguageModeling(
-#     tokenizer=tokenizer,
-#     mlm=False  # Set to False for causal language modeling (e.g., Llama)
-# )
+data_collator = DataCollatorForLanguageModeling(
+    tokenizer=tokenizer,
+    mlm=False  # Set to False for causal language modeling (e.g., Llama)
+)
 
 # Step 6: Train the model using Hugging Face Trainer
 trainer = Trainer(
     model=model,
     args=training_args,
-    # train_dataset=dataset,
-    train_dataset=processed_dataset,
-    tokenizer=tokenizer,
-    # data_collator=data_collator,
+    train_dataset=train_dataset,
+    eval_dataset=eval_dataset,
+    # tokenizer=tokenizer,
+    data_collator=data_collator,
 )
 
 # Step 7: Start training
