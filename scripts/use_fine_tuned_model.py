@@ -20,7 +20,7 @@ if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token  # Use eos_token as pad_token
 
 # Function to generate text
-def generate_answer(question, max_length=150):
+def generate_answer(question, max_length=10240):
     # Tokenize the input question
     inputs = tokenizer(question, return_tensors="pt", padding=True, truncation=True)
 
