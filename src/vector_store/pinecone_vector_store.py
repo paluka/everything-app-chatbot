@@ -2,7 +2,8 @@ from pinecone import Pinecone, ServerlessSpec
 from sentence_transformers import SentenceTransformer
 from config import DELETE_VECTOR_STORE, EMBEDDING_MODEL_NAME, INDEX_NAME, PINECONE_API_KEY
 
-class VectorStore:
+
+class PineconeVectorStore:
     def __init__(self):
         # Initialize Pinecone and the embedding model
         pinecone_client = Pinecone(api_key=PINECONE_API_KEY)
@@ -15,7 +16,6 @@ class VectorStore:
             region="us-east-1"
         )
 
-        
         if DELETE_VECTOR_STORE:
             if any(index['name'] == INDEX_NAME for index in pinecone_client.list_indexes()):
                 pinecone_client.delete_index(INDEX_NAME)
@@ -25,21 +25,10 @@ class VectorStore:
 
         # Create or connect to Pinecone index
         if not any(index['name'] == INDEX_NAME for index in pinecone_client.list_indexes()):
-            pinecone_client.create_index(INDEX_NAME, dimension=dimension, metric=metric, spec=spec)
+            pinecone_client.create_index(
+                INDEX_NAME, dimension=dimension, metric=metric, spec=spec)
 
         self.index = pinecone_client.Index(INDEX_NAME)
-
-    def is_document_in_store(self, doc):
-        # Convert the document to an embedding
-        embedding = self.model.encode([doc])[0]  # Assume your model is SentenceTransformer
-        # Query the vector store (e.g., Pinecone) to check if the embedding already exists
-        results = self.index.query(vector=embedding.tolist(), top_k=1, include_metadata=True)
-        
-        # If the result contains the document text, it means the document is already in the store
-        if results['matches']:
-            return True
-        
-        return False
 
     def load_documents(self, documents):
         """Convert documents to embeddings and load them into the vector store."""
@@ -50,10 +39,28 @@ class VectorStore:
 
     def query(self, query, top_k=5):
         """Search the vector store for relevant documents."""
-        query_embedding = self.model.encode(query)  # Convert the query into an embedding
+
+        query_embedding = self.model.encode(
+            query)  # Convert the query into an embedding
+
         results = self.index.query(
             vector=query_embedding.tolist(),  # The query vector
             top_k=top_k,                      # Number of nearest neighbors to return
-            include_metadata=True             # Include metadata (in this case, the "text")
+            # Include metadata (in this case, the "text")
+            include_metadata=True
         )
         return [result["metadata"]["text"] for result in results["matches"]]
+
+    def is_document_in_store(self, doc):
+        # Convert the document to an embedding
+        # Assume your model is SentenceTransformer
+        embedding = self.model.encode([doc])[0]
+        # Query the vector store (e.g., Pinecone) to check if the embedding already exists
+        results = self.index.query(
+            vector=embedding.tolist(), top_k=1, include_metadata=True)
+
+        # If the result contains the document text, it means the document is already in the store
+        if results['matches']:
+            return True
+
+        return False

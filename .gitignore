@@ -1,6 +1,9 @@
 results
 fine_tuned_model
 
+*.index
+*.metadata
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
