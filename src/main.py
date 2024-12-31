@@ -13,10 +13,14 @@ from fastapi import FastAPI, HTTPException
 
 # pdb.set_trace()
 
+print(
+    f"\n\nUSE_PINECONE_VECTORSTORE: {USE_PINECONE_VECTORSTORE}, USE_LANGCHAIN: {USE_LANGCHAIN}, USE_HAYSTACK: {USE_HAYSTACK}\n\n")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("Starting the app in lifespan")
+
     if USE_PINECONE_VECTORSTORE:
         if not ALREADY_POPULATED_PINECONE:
             documents = load_files(EVERYTHING_APP_FRONTEND_PATH)
@@ -26,6 +30,7 @@ async def lifespan(app: FastAPI):
             documents = load_files(EVERYTHING_APP_FRONTEND_PATH)
             vector_store.load_documents(documents)
 
+    print("About to yield")
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -62,6 +67,8 @@ async def query_chatbot(query: str):
 
 @app.get("/query/")
 async def query_chatbot(query: str):
+    print(f"Received query {query}")
+
     response = chatbot.get_response(query)
     if response:
         return JSONResponse(content={"query": query, "response": response})
