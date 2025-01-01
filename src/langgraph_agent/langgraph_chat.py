@@ -1,7 +1,6 @@
 from langchain_huggingface import HuggingFaceEmbeddings
 from .youtube import get_channel_id, get_latest_video_ids, get_video_info, get_video_transcripts
 from functools import lru_cache, wraps
-import uuid
 from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langgraph.checkpoint.memory import MemorySaver
@@ -23,9 +22,12 @@ from typing import Annotated
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, MessagesState, START, END
 from langgraph.graph.message import add_messages
+from langgraph.errors import GraphInterrupt
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 import os
+import json
+import uuid
 
 # Set the environment variable to disable parallelism warnings
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -38,6 +40,13 @@ print()
 
 NUMBER_OF_VIDEOS = 10
 LLM_TEMPERATURE = 0
+
+base_llm = ChatOllama(model="llama3.2", temperature=LLM_TEMPERATURE)
+# model_path_and_file = "/Users/erikpaluka/Library/Application Support/nomic.ai/GPT4All/Llama-3.2-1B-Instruct-Q4_0.gguf"
+# base_llm = GPT4All(model=model_path_and_file)
+# print(base_llm.generate(["What is an apple?"]))
+# + [AskHuman]) #, parallel_tool_calls=False
+
 
 web_search_tool = TavilySearchResults(
     max_results=1,
@@ -140,24 +149,63 @@ class AskHuman(BaseModel):
     question: str
 
 
+@tool
+@lru_cache(maxsize=100)
+def ask_large_language_model(
+    question: str
+):
+    """Ask the large language model (LLM) a question.
+
+    Args:
+        question (str): the question to ask the large language model (LLM).
+    """
+
+    message = [
+        # SystemMessage(
+        #     content="Do not use tools. Answer the question by yourself."),
+        HumanMessage(content=question),
+        # (
+        #     "user",
+        #     "Use the search tool to ask the user where they are, then look up the weather there",
+        # )
+    ]
+
+    print(f"\n\nAsking LLM a question: {question}\n\n")
+
+    answer = base_llm.invoke(message)
+
+    print(f"\n\nAsking LLM's answer: {answer}\n\n")
+
+    # tool_message = [{
+    #     "type": "tool",
+    #     "name": 'ask_large_language_model',
+    #     'args': {'question': 'What is 1 + 2?'},
+    #     "content": answer
+    # }]
+
+    return {"llm_question": question, "llm_answer": answer.content}
+
+
 class State(MessagesState):
     documents: list[str]
     selected_tools: list[str]
-    question: str
-    answer: str
+    human_question: str
+    human_answer: str
+    llm_question: str
+    llm_answer: str
+    verification: str
 # class State(TypedDict):
     # messages: Annotated[list[Union[HumanMessage, AIMessage]], add_messages]
 
 
 graph_builder = StateGraph(State)
 
-base_llm = ChatOllama(model="llama3.2", temperature=LLM_TEMPERATURE)
-# model_path_and_file = "/Users/erikpaluka/Library/Application Support/nomic.ai/GPT4All/Llama-3.2-1B-Instruct-Q4_0.gguf"
-# base_llm = GPT4All(model=model_path_and_file)
-# print(base_llm.generate(["What is an apple?"]))
-# + [AskHuman]) #, parallel_tool_calls=False
 
-tools = [web_search_tool, youtube_tool, AskHuman]
+tools = [web_search_tool, youtube_tool, AskHuman, ask_large_language_model]
+tools_registry = {tool.name: tool for tool in tools}
+# print(tools_registry)
+# print()
+# raise Exception
 
 # llm_with_tools = base_llm.bind_tools(tools)
 
@@ -168,28 +216,28 @@ tool_documents = [
         id=id,
         metadata={"tool_name": tool.name},
     )
-    for id, tool in enumerate(tools)
+    for id, tool in tools_registry.items()
 ]
-print([doc for doc in tool_documents])
-embedding = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-vector_store = InMemoryVectorStore(embedding=embedding)
-document_ids = vector_store.add_documents(tool_documents)
+# print(tool_documents)
+# print()
+# raise Exception
 
-
-# result = llm_with_tools.invoke(
-#     "Could you validate user 123? They previously lived at "
-#     "123 Fake St in Boston MA and 234 Pretend Boulevard in "
-#     "Houston TX."
-# )
-# print(result)
+###############
+# embedding = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+# vector_store = InMemoryVectorStore(embedding=embedding)
+# document_ids = vector_store.add_documents(tool_documents)
+###############
 
 
 def agent(state: State):
     try:
-        print(f"\n\nagent's messages:\n{state['messages']}\n\n")
+        # print(f"\n\nagent's full state: {state}\n\n")
+        # print(f"\n\nagent's messages:\n{state['messages']}\n\n")
         print(f"\n\nagent's selected_tools:\n{state['selected_tools']}\n\n")
-        selected_tools = [tools[int(id)] for id in state["selected_tools"]]
+        selected_tools = [tools_registry[id] for id in state["selected_tools"]]
+        # print(f"\n\nPast selected tools:\n{selected_tools}\n\n")
         llm_with_tools = base_llm.bind_tools(selected_tools)
+        # print(f"\n\nBound tools\n\n")
         llm_response = llm_with_tools.invoke(state["messages"])
         print(f"\n\nagent's llm_response:\n{llm_response}\n\n")
         return {"messages": [llm_response]}
@@ -198,54 +246,93 @@ def agent(state: State):
 
 
 def ask_human(state: State):
-    last_message = state["messages"][-1]
-    last_message_tool_call = last_message.tool_calls[0]
-    tool_call_question = last_message_tool_call["args"]["question"]
+    try:
+        last_message = state["messages"][-1]
 
-    print(f"\nask_human:\n{tool_call_question}\n")
+        if not hasattr(last_message, 'tool_calls') or not last_message.tool_calls:
 
-    answer = interrupt(
-        {"question": tool_call_question},
-    )
-    print(f"\n\nAnswer:\n{answer}")
+            if hasattr(last_message, 'artifact') and last_message.artifact:
+                query = last_message.artifact['query']
+                results = last_message.artifact['results'][0]['content']
 
-    tool_message = [{
-        "tool_call_id": last_message_tool_call["id"],
-        "type": "tool",
-        "content": answer
-    }]
+            elif hasattr(last_message, 'content') and last_message.content:
+                content_dict = json.loads(last_message.content)
+                query = content_dict['llm_question']
+                results = content_dict['llm_answer']
 
-    return {"messages": tool_message, "question": tool_call_question, "answer": answer}
+            verification = interrupt({"question": f"""Is the following results appropriate for the specified query (Y\\N)? Query: {query}\n
+                            Results: {results}\n\n"""})
+
+            if verification in 'yes':
+                return
+
+            # last_message.artifact = None
+            last_message.content = '{"verification": "The results are not appropriate"}'
+            return
+        else:
+            last_message_tool_call = last_message.tool_calls[0]
+            tool_call_question = last_message_tool_call["args"]["question"]
+
+            print(f"\nask_human:\n{tool_call_question}\n")
+
+            answer = interrupt(
+                {"question": tool_call_question},
+            )
+            print(f"\n\nAnswer:\n{answer}")
+
+            tool_message = [{
+                "tool_call_id": last_message_tool_call["id"],
+                "type": "tool",
+                "content": answer
+            }]
+
+            return {"messages": tool_message, "human_question": tool_call_question, "human_answer": answer}
+    except GraphInterrupt as resumable_error:
+        # Let the resumable exception propagate
+        raise resumable_error
+    except Exception as error:
+        print(f"\n\nask_human's exception:\n{error}\n\n")
 
 
 def should_continue(state: State):
-    last_message = state["messages"][-1]
+    try:
+        last_message = state["messages"][-1]
 
-    # print(f"\nShould continue?: {last_message}\n")
+        # print(f"\nShould continue?: {last_message}\n")
 
-    if not last_message.tool_calls:
-        return END
-    elif last_message.tool_calls[0]["name"] == "AskHuman":
-        return "ask_human"
-    else:
-        question = f"Do you want to invoke the following tool: {last_message.tool_calls[0]['name']}? (Y/N)"
-        human_review = interrupt({"question": question})
+        if not last_message.tool_calls:
+            return END
+        elif last_message.tool_calls[0]["name"] == "AskHuman":
+            return "ask_human"
+        else:
+            question = f"Do you want to invoke the following tool: {last_message.tool_calls[0]['name']}? (Y/N)"
+            human_review = interrupt({"question": question})
 
-        if human_review.lower() in 'yes':
-            print(f"\n\nshould_continue: tools\n\n")
-            return "tools"
+            if human_review.lower() in 'yes':
+                print(f"\n\nshould_continue: tools\n\n")
+                return "tools"
 
-        print(f"\n\nshould_continue: agent\n\n")
-        return "agent"
+            print(f"\n\nshould_continue: agent\n\n")
+            return "agent"
+    except GraphInterrupt as resumable_error:
+        # Let the resumable exception propagate
+        raise resumable_error
+    except Exception as error:
+        print(f"\n\should_continue's exception:\n{error}\n\n")
 
 
 def select_tools(state: State):
-    last_user_message = state["messages"][-1]
-    query = last_user_message.content
-    tools_documents = vector_store.similarity_search(query, k=2)
-    print(
-        f"\n\nselect_tools:\nquery --> {query}\ntools_document:\n{tools_documents}\n\n")
-    return {"selected_tools": [document.id for document in tools_documents]}
+    try:
+        # last_user_message = state["messages"][-1]
+        # query = last_user_message.content
+        # tools_documents = vector_store.similarity_search(query, k=2)
+        # print(
+        #     f"""\n\nselect_tools: \nquery - -> {query}\n\ntools_document: \n
+        #     {[document.id for document in tools_documents]}\n\n""")
+        # return {"selected_tools": [document.id for document in tools_documents]}
+        return {"selected_tools": [t.name for t in tools]}
+    except Exception as error:
+        print(f"\n\select_tools's exception:\n{error}\n\n")
 
 
 tool_node = ToolNode(tools=tools)
@@ -266,9 +353,11 @@ graph_builder.add_conditional_edges(
     "agent",
     should_continue,
     path_map=[END, "ask_human", "tools", "agent"]
+
+
 )
 
-graph_builder.add_edge("tools", "agent")
+graph_builder.add_edge("tools", "ask_human")
 graph_builder.add_edge("ask_human", "agent")
 # graph_builder.set_entry_point("agent")
 
@@ -328,7 +417,8 @@ while True:
             user_input = input("\nUser: ")
         else:
             # user_input = "Ask a human what age they are."
-            user_input = "I want to see where Joe Rogan talks about fasting on his YouTube channel."
+            user_input = "What is 1 + 2?"
+            # user_input = "I want to see where Joe Rogan talks about fasting on his YouTube channel."
             flag = True
 
         if user_input.lower() in ["quit", "exit"]:
