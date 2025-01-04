@@ -1,5 +1,15 @@
+print("\n\nStart of langgraph_chat.py\n\n")  # noqa
+import os  # noqa
+os.environ["TOKENIZERS_PARALLELISM"] = "false"  # noqa
+# noqa
+from dotenv import load_dotenv  # noqa
+load_dotenv()  # noqa
+
+from langfuse.callback import CallbackHandler
+from langfuse import Langfuse
+from langfuse.decorators import observe
+
 from langchain_huggingface import HuggingFaceEmbeddings
-from .youtube import get_channel_id, get_latest_video_ids, get_video_info, get_video_transcripts
 from functools import lru_cache, wraps
 from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_community.tools.tavily_search import TavilySearchResults
@@ -25,23 +35,47 @@ from langgraph.graph.message import add_messages
 from langgraph.errors import GraphInterrupt
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-import os
+
 import json
 import uuid
 
+from src.langgraph_agent.youtube import get_channel_id, get_latest_video_ids, get_video_info, get_video_transcripts
+
 # Set the environment variable to disable parallelism warnings
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # from langchain_community.llms.gpt4all import GPT4All
 # from gpt4all import GPT4All
 
+
+langfuse = Langfuse()
+
+user_id = str(uuid.uuid4())
+session_id = str(uuid.uuid4())
+
+langfuse_handler_workflow = CallbackHandler(
+    user_id=user_id, session_id=session_id, debug=False, tags=['workflow'])
+
+langfuse_callback_handler_agent = CallbackHandler(
+    user_id=user_id, session_id=session_id, debug=False, tags=['agent'])
+
+langfuse_callback_handler_ask_llm = CallbackHandler(
+    user_id=user_id, session_id=session_id, debug=False, tags=['ask_llm'])
+
+
+# Initialize Langfuse CallbackHandler for Langchain (tracing)
+
+# Optional, verify that Langfuse is configured correctly
+assert langfuse.auth_check()
+assert langfuse_callback_handler_agent.auth_check()
+assert langfuse_callback_handler_ask_llm.auth_check()
 
 print()
 
 NUMBER_OF_VIDEOS = 10
 LLM_TEMPERATURE = 0
 
-base_llm = ChatOllama(model="llama3.2", temperature=LLM_TEMPERATURE)
+base_llm = ChatOllama(model="llama3.2", temperature=LLM_TEMPERATURE, callbacks=[
+                      langfuse_callback_handler_agent])
 # model_path_and_file = "/Users/erikpaluka/Library/Application Support/nomic.ai/GPT4All/Llama-3.2-1B-Instruct-Q4_0.gguf"
 # base_llm = GPT4All(model=model_path_and_file)
 # print(base_llm.generate(["What is an apple?"]))
@@ -160,30 +194,63 @@ def ask_large_language_model(
         question (str): the question to ask the large language model (LLM).
     """
 
-    message = [
-        # SystemMessage(
-        #     content="Do not use tools. Answer the question by yourself."),
-        HumanMessage(content=question),
-        # (
-        #     "user",
-        #     "Use the search tool to ask the user where they are, then look up the weather there",
-        # )
-    ]
+    try:
+        # message = [
+        #     # SystemMessage(
+        #     #     content="Do not use tools. Answer the question by yourself."),
+        #     HumanMessage(content=question),
+        #     # (
+        #     #     "user",
+        #     #     "Use the search tool to ask the user where they are, then look up the weather there",
+        #     # )
+        # ]
 
-    print(f"\n\nAsking LLM a question: {question}\n\n")
+        print(f"\n\nAsking LLM a question: {question}\n\n")
 
-    answer = base_llm.invoke(message)
+        langfuse_prompt = langfuse.get_prompt("ask_large_language_model")
 
-    print(f"\n\nAsking LLM's answer: {answer}\n\n")
+        print(
+            f"\n\nAsking LLM a question. langfuse_prompt: {langfuse_prompt}\n\n")
 
-    # tool_message = [{
-    #     "type": "tool",
-    #     "name": 'ask_large_language_model',
-    #     'args': {'question': 'What is 1 + 2?'},
-    #     "content": answer
-    # }]
+        langfuse_langchain_prompt = langfuse_prompt.get_langchain_prompt()
 
-    return {"llm_question": question, "llm_answer": answer.content}
+        print(
+            f"\n\nAsking LLM a question. langfuse_langchain_prompt: {langfuse_langchain_prompt}\n\n")
+
+        langchain_prompt = ChatPromptTemplate(
+            messages=langfuse_langchain_prompt,
+            metadata={"langfuse_prompt": langfuse_prompt},
+        )
+
+        # print(
+        # f"\n\nAsking LLM a question. langchain_prompt: {langchain_prompt}\n\n")
+
+        # message = langchain_prompt.format(question=question)
+        # message = langfuse_prompt.format(question=question)
+        # print(f"\n\nAsking LLM a question. Message: {message}\n\n")
+
+        dynamic_llm = ChatOllama(
+            model=langfuse_prompt.config["model"],
+            temperature=int(langfuse_prompt.config["temperature"]),
+            callbacks=[langfuse_callback_handler_ask_llm]
+        )
+        chain = langchain_prompt | dynamic_llm
+        input = {question}
+        answer = chain.invoke(
+            input=input)  # , config={"callbacks": [langfuse_callback_handler]})
+
+        print(f"\n\nAsking LLM's answer: {answer}\n\n")
+
+        # tool_message = [{
+        #     "type": "tool",
+        #     "name": 'ask_large_language_model',
+        #     'args': {'question': 'What is 1 + 2?'},
+        #     "content": answer
+        # }]
+
+        return {"llm_question": question, "llm_answer": answer.content}
+    except Exception as error:
+        print(f"\n\nError in ask_large_language_model:\n\n{error}\n\n")
 
 
 class State(MessagesState):
@@ -198,7 +265,7 @@ class State(MessagesState):
     # messages: Annotated[list[Union[HumanMessage, AIMessage]], add_messages]
 
 
-graph_builder = StateGraph(State)
+workflow = StateGraph(State)
 
 
 tools = [web_search_tool, youtube_tool, AskHuman, ask_large_language_model]
@@ -217,6 +284,8 @@ tool_documents = [
         metadata={"tool_name": tool.name},
     )
     for id, tool in tools_registry.items()
+
+
 ]
 # print(tool_documents)
 # print()
@@ -245,6 +314,7 @@ def agent(state: State):
         print(f"\n\nagent's exception:\n{error}\n\n")
 
 
+@observe()
 def ask_human(state: State):
     try:
         last_message = state["messages"][-1]
@@ -260,10 +330,10 @@ def ask_human(state: State):
                 query = content_dict['llm_question']
                 results = content_dict['llm_answer']
 
-            verification = interrupt({"question": f"""Is the following results appropriate for the specified query (Y\\N)? Query: {query}\n
+            verification = interrupt({"question": f"""Is the following results appropriate for the specified query (Y\\n)? Query: {query}\n
                             Results: {results}\n\n"""})
 
-            if verification in 'yes':
+            if verification == '' or verification in 'yes':
                 return
 
             # last_message.artifact = None
@@ -294,6 +364,7 @@ def ask_human(state: State):
         print(f"\n\nask_human's exception:\n{error}\n\n")
 
 
+@observe()
 def should_continue(state: State):
     try:
         last_message = state["messages"][-1]
@@ -305,10 +376,10 @@ def should_continue(state: State):
         elif last_message.tool_calls[0]["name"] == "AskHuman":
             return "ask_human"
         else:
-            question = f"Do you want to invoke the following tool: {last_message.tool_calls[0]['name']}? (Y/N)"
+            question = f"Do you want to invoke the following tool: {last_message.tool_calls[0]['name']}? (Y/n)"
             human_review = interrupt({"question": question})
 
-            if human_review.lower() in 'yes':
+            if human_review == '' or human_review.lower() in 'yes':
                 print(f"\n\nshould_continue: tools\n\n")
                 return "tools"
 
@@ -336,20 +407,20 @@ def select_tools(state: State):
 
 
 tool_node = ToolNode(tools=tools)
-graph_builder.add_node("tools", tool_node)
+workflow.add_node("tools", tool_node)
 
-graph_builder.add_node("select_tools", select_tools)
+workflow.add_node("select_tools", select_tools)
 
-graph_builder.add_node("agent", agent)
+workflow.add_node("agent", agent)
 
-graph_builder.add_node("ask_human", ask_human)
+workflow.add_node("ask_human", ask_human)
 
-graph_builder.add_edge(START, "select_tools")
+workflow.add_edge(START, "select_tools")
 
 
-graph_builder.add_edge("select_tools", "agent")
+workflow.add_edge("select_tools", "agent")
 
-graph_builder.add_conditional_edges(
+workflow.add_conditional_edges(
     "agent",
     should_continue,
     path_map=[END, "ask_human", "tools", "agent"]
@@ -357,22 +428,31 @@ graph_builder.add_conditional_edges(
 
 )
 
-graph_builder.add_edge("tools", "ask_human")
-graph_builder.add_edge("ask_human", "agent")
-# graph_builder.set_entry_point("agent")
+workflow.add_edge("tools", "ask_human")
+workflow.add_edge("ask_human", "agent")
+# workflow.set_entry_point("agent")
 
 
-graph_builder.add_edge("agent", END)
+workflow.add_edge("agent", END)
 
 
-graph = graph_builder.compile(
-    checkpointer=MemorySaver())  # , interrupt_before=["ask_human"],)  # , interrupt_before=["tools"],)
+graph = workflow.compile(
+    checkpointer=MemorySaver()
+    # , interrupt_before=["ask_human"],)  # , interrupt_before=["tools"],)
+)
 
-thread_config = {"configurable": {"thread_id": uuid.uuid4(), }}
+workflow_config = {
+    "configurable": {"thread_id": uuid.uuid4(), },
+    "callbacks": [langfuse_handler_workflow]
+}
 
 
 def stream_graph_updates(graph_input: dict):
-    for event in graph.stream(graph_input, thread_config, stream_mode="values"):
+    for event in graph.stream(
+        graph_input,
+        config=workflow_config,
+        stream_mode="values",
+    ):
         # print(f"Event: {event} \n")
 
         if "messages" in event:
@@ -385,7 +465,7 @@ def stream_graph_updates(graph_input: dict):
         #         print(value.pretty_print())
         #         print("\n...\n")
 
-    snapshot = graph.get_state(thread_config)
+    snapshot = graph.get_state(workflow_config)
 
     if snapshot.next:
         print(f"\nInterrupt Snapshot Next: \n{snapshot.next}\n")
@@ -397,6 +477,9 @@ def stream_graph_updates(graph_input: dict):
             f"\n\nTasks:\n{interrupt.value}\n")
         try:
             user_input = input(f"{interrupt.value['question']} User: ")
+
+            if not user_input:
+                user_input = 'y'
 
             if interrupt.resumable:
                 # if user_input.lower() == 'y':

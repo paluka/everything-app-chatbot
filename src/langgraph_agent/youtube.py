@@ -2,10 +2,13 @@ from googleapiclient.discovery import build
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound
 from typing import Tuple, List
+from dotenv import load_dotenv
+import os
 
+load_dotenv()
 
 # YouTube Data API setup
-API_KEY = "AIzaSyCxPFNmQyF2TqokMtSaNQcyYmkBOuB341c"
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 YOUTUBE_API_SERVICE_NAME = "youtube"
 YOUTUBE_API_VERSION = "v3"
 
@@ -14,7 +17,7 @@ YOUTUBE_API_VERSION = "v3"
 NUMBER_OF_VIDEOS = 5  # Specify the number of latest videos to fetch
 
 youtube = build(YOUTUBE_API_SERVICE_NAME,
-                YOUTUBE_API_VERSION, developerKey=API_KEY)
+                YOUTUBE_API_VERSION, developerKey=YOUTUBE_API_KEY)
 
 
 def get_channel_id(query: str) -> Tuple[str, str]:

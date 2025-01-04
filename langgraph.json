@@ -1,0 +1,11 @@
+{
+  "dockerfile_lines": [
+    "RUN apt update && apt install -y build-essential cmake"
+  ],
+  "graphs": {
+    "agent": "./src/langgraph_agent/langgraph_chat.py:graph"
+  },
+  "env": ".env",
+  "python_version": "3.11",
+  "dependencies": ["."]
+}
