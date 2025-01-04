@@ -1,5 +1,6 @@
 results
 fine_tuned_model
+.langgraph_api
 
 *.index
 *.metadata

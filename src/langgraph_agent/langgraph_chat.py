@@ -376,11 +376,18 @@ def should_continue(state: State):
         elif last_message.tool_calls[0]["name"] == "AskHuman":
             return "ask_human"
         else:
-            question = f"Do you want to invoke the following tool: {last_message.tool_calls[0]['name']}? (Y/n)"
+            question = f"Do you want to invoke the following tool: {
+                last_message.tool_calls[0]['name']}? (Y/n)"
             human_review = interrupt({"question": question})
 
-            if human_review == '' or human_review.lower() in 'yes':
-                print(f"\n\nshould_continue: tools\n\n")
+            if isinstance(human_review, dict):
+
+                if 'content' in human_review and \
+                        (human_review['content'] == '' or human_review['content'].lower() in 'yes'):
+                    print(f"\n\nshould_continue dict: tools\n\n")
+                    return "tools"
+            elif human_review == '' or human_review.lower() in 'yes':
+                print(f"\n\nshould_continue string: tools\n\n")
                 return "tools"
 
             print(f"\n\nshould_continue: agent\n\n")
@@ -389,7 +396,7 @@ def should_continue(state: State):
         # Let the resumable exception propagate
         raise resumable_error
     except Exception as error:
-        print(f"\n\should_continue's exception:\n{error}\n\n")
+        print(f"\n\nshould_continue\'s exception:\n{error}\n\n")
 
 
 def select_tools(state: State):
@@ -403,7 +410,7 @@ def select_tools(state: State):
         # return {"selected_tools": [document.id for document in tools_documents]}
         return {"selected_tools": [t.name for t in tools]}
     except Exception as error:
-        print(f"\n\select_tools's exception:\n{error}\n\n")
+        print(f"\n\nselect_tools\' exception:\n{error}\n\n")
 
 
 tool_node = ToolNode(tools=tools)
@@ -493,7 +500,7 @@ def stream_graph_updates(graph_input: dict):
 
 flag = False
 
-while True:
+while False:
 
     try:
         if flag:
@@ -538,3 +545,6 @@ while True:
 
 # print(output)
 print("\n")
+
+
+__all__ = ["graph"]
