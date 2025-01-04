@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "everything-app-chatbot"
+version = "0.1.0"
+description = "GenAI and Agentic AI system"
+authors = ["Erik Paluka"]
+readme = "README.md"
+
+
+[tool.poetry.dependencies]
+python = "3.12.*"
+langchain = "^0.3.14"
+langserve = "^0.3.1"
+fastapi = "^0.115.6"
+
+
+[tool.poetry.group.dev.dependencies]
+langchain-cli = "^0.0.35"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

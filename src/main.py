@@ -77,4 +77,5 @@ async def query_chatbot(query: str):
             status_code=500, detail="Could not generate response.")
 
 if __name__ == "__main__":
+    print(f"\n\nmain.py\n\n")
     uvicorn.run(app, host="0.0.0.0", port=8000)

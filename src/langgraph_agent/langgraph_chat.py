@@ -236,8 +236,7 @@ def ask_large_language_model(
         )
         chain = langchain_prompt | dynamic_llm
         input = {question}
-        answer = chain.invoke(
-            input=input)  # , config={"callbacks": [langfuse_callback_handler]})
+        answer = chain.invoke(input=input)
 
         print(f"\n\nAsking LLM's answer: {answer}\n\n")
 
